@@ -11,7 +11,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.lib import colors
 import textwrap
 
-# 명령행 인자 처리: csv_path, store_name, start_date, end_date
+# Handle command-line arguments: csv_path, store_name, start_date, end_date
 if len(sys.argv) < 5:
     print("Usage: report_generator.py <csv_path> <store_name> <start_date> <end_date>", file=sys.stderr)
     sys.exit(1)
@@ -20,12 +20,12 @@ CSV_PATH   = sys.argv[1]
 STORE_NAME = sys.argv[2]
 START_DATE = sys.argv[3]
 END_DATE   = sys.argv[4]
-API_KEY    = "AIzaSyCQ-UFdg0nN-Cc8CHBVZaYFm_hBHBFj_lc"  # 여기에 실제 API 키 설정
+API_KEY    = ""  # Insert your API key here
 
-# CSV 로드 (CSV 헤더 컬럼 이름에 맞춤)
+# Load CSV data (headers must match these column names)
 df = pd.read_csv(CSV_PATH, parse_dates=["collectedAt"])
 
-# 분석 함수
+# Analyze and summarize collection records for a given store and date range
 def analyze_store_range_summary(store_name, start_date, end_date, df):
     start    = pd.to_datetime(start_date)
     end      = pd.to_datetime(end_date)
@@ -34,6 +34,7 @@ def analyze_store_range_summary(store_name, start_date, end_date, df):
     if filtered.empty:
         return None, None
 
+    # Calculate average days between collections
     interval = filtered["collectedAt"].diff().dt.days.mean()
     summary = {
         "store_name":   store_name,
@@ -46,7 +47,7 @@ def analyze_store_range_summary(store_name, start_date, end_date, df):
     }
     return summary, filtered
 
-# GPT 프롬프트 생성 함수
+# Generate executive summary prompt for AI model
 def generate_prompt(summary):
     return f"""
 Write a business-style executive summary for waste oil collection.
@@ -62,6 +63,7 @@ Period: {summary['start']} ~ {summary['end']}
 Summarize this with clear insights.
 """
 
+# Generate prompt describing chart data for AI insights
 def generate_chart_prompt(store_name, dates, values, ylabel):
     date_str  = dates.dt.strftime("%Y-%m-%d").tolist()
     value_str = values.round(2).tolist()
@@ -74,7 +76,7 @@ Y-axis ({ylabel}): {value_str}
 Write 3–5 business insights about this graph.
 """
 
-# Gemini API 호출 함수
+# Call Google Gemini API with given prompt
 def call_gemini(prompt, api_key):
     url     = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent"
     headers = {"Content-Type": "application/json"}
@@ -83,7 +85,7 @@ def call_gemini(prompt, api_key):
     resp.raise_for_status()
     return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
 
-# 차트 생성 함수
+# Create a line chart buffer for the specified DataFrame column
 def create_plot(df, y_column, title, ylabel):
     plt.figure(figsize=(7, 4))
     plt.plot(df["collectedAt"], df[y_column], marker="o")
@@ -98,7 +100,7 @@ def create_plot(df, y_column, title, ylabel):
     plt.close()
     return buf
 
-# PDF 생성 함수
+# Assemble the report PDF with text and charts
 def create_final_pdf(report_text, chart_texts, charts, filename, summary):
     c      = canvas.Canvas(filename, pagesize=A4)
     width, height = A4
@@ -110,7 +112,7 @@ def create_final_pdf(report_text, chart_texts, charts, filename, summary):
     c.setFont("Helvetica", 11)
     c.drawString(2*cm, height-3.2*cm, f"Store: {summary['store_name']}")
     c.drawString(2*cm, height-3.8*cm, f"Period: {summary['start']} ~ {summary['end']}")
-    # Executive Summary
+    # Executive Summary Section
     y = height - 5*cm
     c.setFont("Helvetica-Bold", 12)
     c.drawString(2*cm, y, "Executive Summary")
@@ -119,7 +121,7 @@ def create_final_pdf(report_text, chart_texts, charts, filename, summary):
     for line in textwrap.wrap(report_text, 100):
         c.drawString(2*cm, y, line)
         y -= 0.45*cm
-    # Charts
+    # Charts and their insights
     for buf, text, title in zip(charts, chart_texts, ["Volume Trend", "Revenue Trend"]):
         y -= cm
         c.drawImage(ImageReader(buf), 2*cm, y-5*cm, width=16*cm, height=5*cm)
@@ -140,19 +142,25 @@ def create_final_pdf(report_text, chart_texts, charts, filename, summary):
     c.drawString(2*cm, 1.5*cm, "© 2025 ECOGEM")
     c.save()
 
-# Main 실행
+# Main execution
 if __name__ == "__main__":
     summary, filtered_df = analyze_store_range_summary(
         STORE_NAME, START_DATE, END_DATE, df
     )
     if summary:
-        rpt    = call_gemini(generate_prompt(summary), API_KEY)
-        vol    = call_gemini(generate_chart_prompt(
-            STORE_NAME, filtered_df["collectedAt"], filtered_df["volumeLiter"], "Volume (L)"
-        ), API_KEY)
-        rev    = call_gemini(generate_chart_prompt(
-            STORE_NAME, filtered_df["collectedAt"], filtered_df["totalPrice"],  "Revenue (KRW)"
-        ), API_KEY)
+        rpt   = call_gemini(generate_prompt(summary), API_KEY)
+        vol   = call_gemini(
+            generate_chart_prompt(
+                STORE_NAME, filtered_df["collectedAt"], filtered_df["volumeLiter"], "Volume (L)"
+            ),
+            API_KEY
+        )
+        rev   = call_gemini(
+            generate_chart_prompt(
+                STORE_NAME, filtered_df["collectedAt"], filtered_df["totalPrice"],  "Revenue (KRW)"
+            ),
+            API_KEY
+        )
         charts = [create_plot(filtered_df, "volumeLiter", "Volume Trend", "Volume (L)"),
                   create_plot(filtered_df, "totalPrice",  "Revenue Trend", "Revenue (KRW)")]
         filename = f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
